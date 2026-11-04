@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArrowDownToLine,
@@ -20,7 +20,6 @@ import {
   RefreshCw,
   Search,
   Settings,
-  ShieldCheck,
   ShoppingBag,
   Star,
   Users,
@@ -28,7 +27,8 @@ import {
   Tags,
   X,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import LoginPage from '@/LoginPage';
+import { isLocalPreview, supabase } from '@/lib/supabase';
 
 type Product = {
   id: string;
@@ -97,6 +97,12 @@ function formatTime(value: string) {
 }
 
 function App() {
+  const [loginStatus, setLoginStatus] = useState<'checking' | 'unauthenticated' | 'authenticated'>(
+    isLocalPreview ? 'unauthenticated' : 'checking',
+  );
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('cjv-remember-login') === 'true');
   const [view, setView] = useState<View>('Overview');
   const [products, setProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
@@ -112,8 +118,52 @@ function App() {
   const [notice, setNotice] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const clearWorkspaceData = useCallback(() => {
+    setProducts([]);
+    setMovements([]);
+    setScans([]);
+    setOrders([]);
+    setRatings([]);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
+    if (isLocalPreview) return;
+
+    let active = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: { access_token: string } | null) => {
+      if (event === 'SIGNED_OUT') {
+        clearWorkspaceData();
+        setLoginStatus('unauthenticated');
+      }
+      else if (session) setLoginStatus('authenticated');
+    });
+
+    void supabase.auth.getSession().then(({ data, error }: { data: { session: unknown }; error: Error | null }) => {
+      if (!active) return;
+      if (error) {
+        setLoginError('Your sign-in session could not be restored. Please sign in again.');
+        setLoginStatus('unauthenticated');
+        return;
+      }
+      setLoginStatus(data.session ? 'authenticated' : 'unauthenticated');
+    }).catch(() => {
+      if (!active) return;
+      setLoginError('The sign-in service is temporarily unavailable.');
+      setLoginStatus('unauthenticated');
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [clearWorkspaceData]);
+
+  useEffect(() => {
+    if (loginStatus !== 'authenticated') return;
+
     async function loadWorkspace() {
+      setLoading(true);
       const [productResult, movementResult, scanResult, orderResult, ratingResult] = await Promise.all([
         supabase.from('inventory_products').select('*').order('created_at', { ascending: true }),
         supabase.from('inventory_movements').select('*').order('created_at', { ascending: false }).limit(8),
@@ -137,7 +187,7 @@ function App() {
       setLoading(false);
     }
     void loadWorkspace();
-  }, []);
+  }, [loginStatus]);
 
   const filteredProducts = useMemo(() => products.filter((product) => {
     const matchesQuery = `${product.name} ${product.brand} ${product.sku}`.toLowerCase().includes(query.toLowerCase());
@@ -280,13 +330,73 @@ function App() {
     setNotice('Scan complete. One item needs a quick review.');
   }
 
+  async function handleLogin(username: string, password: string) {
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const { data, error } = await supabase.functions.invoke('login-gate', {
+        body: { username, password },
+      });
+      if (error || !data?.session?.access_token || !data.session.refresh_token) {
+        const status = error?.context?.status;
+        setLoginError(
+          status === 429
+            ? 'Too many attempts. Try again in 15 minutes.'
+            : status === 401
+              ? 'Username or password is incorrect.'
+              : 'The login service is unavailable. Please try again later.',
+        );
+        return;
+      }
+
+      localStorage.setItem('cjv-remember-login', rememberMe ? 'true' : 'false');
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+      if (sessionError) {
+        setLoginError('Sign-in could not be completed. Please try again.');
+        return;
+      }
+      setLoginStatus('authenticated');
+    } catch {
+      setLoginError('The login service is unavailable. Please try again later.');
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setNotice('Could not sign out. Please try again.');
+      return;
+    }
+    setLoginStatus('unauthenticated');
+  }
+
+  if (loginStatus === 'checking') {
+    return <main className="login-checking" aria-live="polite">Checking your sign-in session…</main>;
+  }
+  if (loginStatus === 'unauthenticated') {
+    return (
+      <LoginPage
+        error={isLocalPreview ? 'Connect this app to Supabase to enable secure sign-in.' : loginError}
+        isLoading={loginLoading}
+        rememberMe={rememberMe}
+        onRememberMeChange={setRememberMe}
+        onSubmit={handleLogin}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
-        <div className="brand-lockup"><div className="brand-mark"><ShieldCheck size={19} /></div><div><strong>CJV</strong><span>Luxury inventory</span></div></div>
+        <div className="brand-lockup"><img className="brand-logo" src="/cjv-logo.png" alt="CJV Luxury Bags & Watches" /></div>
         <div className="workspace-switcher"><div className="workspace-avatar">C</div><div><span>Workspace</span><strong>CJV Showroom</strong></div><ChevronDown size={16} /></div>
         <nav className="main-nav"><span className="nav-label">Workspace</span>{navItems.map(({ label, icon: Icon }) => <button className={view === label ? 'nav-item active' : 'nav-item'} key={label} onClick={() => { setView(label); setMobileMenuOpen(false); }}><Icon size={18} /><span>{label}</span>{label === 'Camera scan' && <span className="nav-dot" />}</button>)}</nav>
-        <div className="sidebar-bottom"><button className="nav-item" onClick={() => setView('Categories')}><Tags size={18} /><span>Categories</span></button><button className="nav-item"><Settings size={18} /><span>Settings</span></button><button className="nav-item" onClick={() => setNotice('You are already working in the shared CJV workspace.')}><LogOut size={18} /><span>Log out</span></button><div className="help-card"><Sparkles size={18} /><strong>Smart verification</strong><p>Use the camera to catch stock differences before they become costly.</p><button onClick={() => setView('Camera scan')}>Try a scan <ArrowUpRight size={14} /></button></div><div className="profile"><div className="profile-avatar">JD</div><div><strong>Jordan Davis</strong><span>Inventory manager</span></div><ChevronDown size={15} /></div></div>
+        <div className="sidebar-bottom"><button className="nav-item" onClick={() => setView('Categories')}><Tags size={18} /><span>Categories</span></button><button className="nav-item"><Settings size={18} /><span>Settings</span></button><button className="nav-item" onClick={() => void handleLogout()}><LogOut size={18} /><span>Log out</span></button><div className="help-card"><Sparkles size={18} /><strong>Smart verification</strong><p>Use the camera to catch stock differences before they become costly.</p><button onClick={() => setView('Camera scan')}>Try a scan <ArrowUpRight size={14} /></button></div><div className="profile"><div className="profile-avatar">JD</div><div><strong>Jordan Davis</strong><span>Inventory manager</span></div><ChevronDown size={15} /></div></div>
       </aside>
 
       <main className="main-content">

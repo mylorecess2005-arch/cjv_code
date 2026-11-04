@@ -11,10 +11,9 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .65; }
 .app-shell { display: flex; min-height: 100vh; background: #f7f9fa; }
 .sidebar { width: 248px; background: #fff; border-right: 1px solid #e7edef; padding: 25px 15px 17px; display: flex; flex-direction: column; flex-shrink: 0; }
-.brand-lockup { display: flex; align-items: center; gap: 10px; padding: 0 12px 25px; }
-.brand-mark { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: #fff; background: #274852; box-shadow: 0 7px 15px #2748522b; }
-.brand-lockup strong { display: block; font-family: 'Playfair Display', serif; font-size: 19px; letter-spacing: .04em; color: #1d3138; line-height: 1; }
-.brand-lockup span, .workspace-switcher span, .profile span { display: block; color: #86939a; font-size: 11px; margin-top: 3px; }
+.brand-lockup { display: flex; justify-content: center; padding: 0 7px 25px; }
+.brand-logo { display: block; width: 100%; max-width: 190px; height: auto; }
+.workspace-switcher span, .profile span { display: block; color: #86939a; font-size: 11px; margin-top: 3px; }
 .workspace-switcher { padding: 11px; background: #f4f7f7; border: 1px solid #e8eeee; border-radius: 12px; display: flex; align-items: center; gap: 9px; margin-bottom: 27px; }
 .workspace-switcher > svg { margin-left: auto; color: #94a0a5; }
 .workspace-avatar, .profile-avatar { display: grid; place-items: center; border-radius: 9px; color: #fff; font-weight: 700; background: #668c80; }
